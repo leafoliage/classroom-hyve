@@ -17,9 +17,12 @@ from PyQt5.QtGui import QPixmap, QColor
 from PyQt5.QtCore import QSize
 import asyncio, asyncvnc
 from PIL import Image
+import libzfs_core as lzc
+from datetime import datetime
 
 
 vncviewer_path="./vncviewer"
+vm_dir_dataset="zroot/vm"
 
 
 async def vnc_capture(port=5900):
@@ -57,6 +60,30 @@ class Ui_MainWindow(object):
         self.pushButton.setStyleSheet("font: 14pt \"Noto Sans\";")
         self.pushButton.setObjectName("pushButton")
         self.pushButton.clicked.connect(lambda: self.open_vm(MainWindow))
+
+        self.exportButton = QtWidgets.QPushButton(self.centralwidget)
+        self.exportButton.setGeometry(QtCore.QRect(1320, 960, 251, 61))
+        self.exportButton.setStyleSheet("font: 14pt \"Noto Sans\";")
+        self.exportButton.setObjectName("exportButton")
+        self.exportButton.clicked.connect(lambda: self.export_vm(vm=self.curr_vm))
+
+        self.importButton = QtWidgets.QPushButton(self.centralwidget)
+        self.importButton.setGeometry(QtCore.QRect(1020, 960, 251, 61))
+        self.importButton.setStyleSheet("font: 14pt \"Noto Sans\";")
+        self.importButton.setObjectName("importButton")
+        self.importButton.clicked.connect(lambda: self.import_vm())
+
+        self.exportDiffButton = QtWidgets.QPushButton(self.centralwidget)
+        self.exportDiffButton.setGeometry(QtCore.QRect(720, 960, 251, 61))
+        self.exportDiffButton.setStyleSheet("font: 14pt \"Noto Sans\";")
+        self.exportDiffButton.setObjectName("exportDiffButton")
+        self.exportDiffButton.clicked.connect(lambda: self.export_diff())
+
+        self.importDiffButton = QtWidgets.QPushButton(self.centralwidget)
+        self.importDiffButton.setGeometry(QtCore.QRect(420, 960, 251, 61))
+        self.importDiffButton.setStyleSheet("font: 14pt \"Noto Sans\";")
+        self.importDiffButton.setObjectName("importDiffButton")
+        self.importDiffButton.clicked.connect(lambda: self.import_diff())
         
         self.frame = QtWidgets.QFrame(self.centralwidget)
         self.frame.setGeometry(QtCore.QRect(0, 0, 351, 1041))
@@ -113,6 +140,10 @@ class Ui_MainWindow(object):
         _translate = QtCore.QCoreApplication.translate
         MainWindow.setWindowTitle(_translate("MainWindow", "MainWindow"))
         self.pushButton.setText(_translate("MainWindow", "Enter VM"))
+        self.exportButton.setText(_translate("MainWindow", "Export VM"))
+        self.importButton.setText(_translate("MainWindow", "Import VM"))
+        self.exportDiffButton.setText(_translate("MainWindow", "Export Diff"))
+        self.importDiffButton.setText(_translate("MainWindow", "Import Diff"))
         self.label.setText(_translate("MainWindow", self.curr_vm))
 
     def open_vm(self, MainWindow):
@@ -185,3 +216,78 @@ class Ui_MainWindow(object):
             result.append(vm_name)
     
         return result
+
+    def export_vm(self, vm="ubuntu0", export_dir="/tmp"):
+        vm_dataset=f"{vm_dir_dataset}/{vm}"
+        vm_base_snap=f"{vm_dataset}@snap0"
+        if not lzc.lzc_exists(vm_base_snap.encode()):
+            print(f"{vm_base_snap} not exist, snapshoting")
+            try:
+                lzc.lzc_snapshot([vm_base_snap.encode()])
+            except Exception as err:
+                print(err)
+                return
+ 
+        with open(f"{export_dir}/{vm}-base.zfs", 'w') as f:
+            print(f"exporting {vm_base_snap}")
+            lzc.lzc_send(vm_base_snap.encode(), fromsnap=None, fd=f.fileno())
+
+        return
+
+    def import_vm(self, vm="ubuntu3", img="/tmp/ubuntu0-base.zfs"):
+        vm_dataset=f"{vm_dir_dataset}/{vm}"
+        vm_base_snap=f"{vm_dataset}@snap0"
+
+        if lzc.lzc_exists(vm_dataset.encode()):
+            print(f"{vm_dataset} exists, cannot import")
+            return
+
+        if not os.path.isfile(img):
+            print(f"{img} is not a file")
+            return
+
+        with open(img, 'r') as f:
+            print(f"Importing {vm_base_snap}")
+            print(f.fileno())
+            #lzc.lzc_receive(vm_base_snap.encode(), fd=f.fileno())
+            subprocess.run(f"cat {img} | mdo zfs recv {vm_dataset}", shell=True)
+
+    def export_diff(self, vm="ubuntu2", export_dir="/tmp"):
+        timestamp_str = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        vm_dataset=f"{vm_dir_dataset}/{vm}"
+        vm_base_snap=f"{vm_dataset}@snap0"
+        vm_new_snap=f"{vm_dataset}@{timestamp_str}"
+
+        if not lzc.lzc_exists(vm_base_snap.encode()):
+            print(f"{vm_base_snap} not exist, cannot export diff")
+            return
+
+        lzc.lzc_snapshot([vm_new_snap.encode()])
+
+        diff_img = f"{export_dir}/{vm}-{timestamp_str}.zfs"
+        with open(diff_img, 'w') as f:
+            print(f"Exporting diff {vm_new_snap} to {diff_img}")
+            lzc.lzc_send(vm_new_snap.encode(), fromsnap=vm_base_snap.encode(), fd=f.fileno())
+        #subprocess.run(f"zfs send -i {vm_base_snap} {vm_new_snap} > {diff_img}", shell=True)
+
+    def import_diff(self, vm="ubuntu3", img="/tmp/ubuntu2-diff.zfs"):
+        #timestamp_str = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        vm_dataset=f"{vm_dir_dataset}/{vm}"
+        vm_base_snap=f"{vm_dataset}@snap0"
+        #vm_new_snap=f"{vm_dataset}@{timestamp_str}"
+
+        if not lzc.lzc_exists(vm_base_snap.encode()):
+            print(f"{vm_base_snap} not exist, cannot export diff")
+            return
+
+        if not os.path.isfile(img):
+            print(f"{img} is not a file")
+            return
+
+        with open(img, 'r') as f:
+            print(f"Importing diff {img} to {vm_dataset}")
+            #lzc.lzc_receive(vm_new_snap.encode(), fd=f.fileno())
+            subprocess.run(f"cat {img} | mdo zfs receive {vm_dataset}", shell=True)
+
+        conf = subprocess.check_output(f"ls /{vm_dataset} | grep .conf", shell=True, stderr=subprocess.STDOUT, universal_newlines=True).strip()
+        os.rename(f"/{vm_dataset}/{conf}", f"/{vm_dataset}/{vm}.conf")
