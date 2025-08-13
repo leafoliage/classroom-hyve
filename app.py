@@ -1,3 +1,4 @@
+#!/usr/local/bin/python3.11
 import sys
 
 from PyQt5.QtWidgets import QApplication, QDialog, QMainWindow, QPushButton

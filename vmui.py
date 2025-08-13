@@ -19,6 +19,9 @@ import asyncio, asyncvnc
 from PIL import Image
 
 
+vncviewer_path="./vncviewer"
+
+
 async def vnc_capture(port=5900):
     try:
         async with asyncvnc.connect('localhost', port) as client:
@@ -118,15 +121,15 @@ class Ui_MainWindow(object):
             MainWindow.close()
         else:
             try:
-                output = subprocess.check_output(f"vm start {self.curr_vm}", shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
+                output = subprocess.check_output(f"mdo vm start {self.curr_vm}", shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
                 self.pushButton.setText("Starting...")
                 #self.pushButton.setText(_translate("MainWindow", "Starting.."))
                 if "running already" not in output:
                     time.sleep(1)
-                cmd1 = f"vm info {self.curr_vm} | grep vnc | cut -d':' -f3"
+                cmd1 = f"mdo vm info {self.curr_vm} | grep vnc | cut -d':' -f3"
                 port = subprocess.check_output(cmd1, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
                 vnc = int(port) - 5900
-                cmd2 = f"vncviewer -Fullscreen localhost:{vnc}"
+                cmd2 = f"{vncviewer_path} -Fullscreen localhost:{vnc}"
                 output = subprocess.check_output(cmd2, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
                 self.pushButton.setText("Enter VM")
                 #self.pushButton.setText(_translate("MainWindow", "Enter VM"))
@@ -149,7 +152,7 @@ class Ui_MainWindow(object):
             except:
                 return
             return
-        cmd1 = f"vm info {name} | grep vnc | cut -d':' -f3"
+        cmd1 = f"mdo vm info {name} | grep vnc | cut -d':' -f3"
         port = subprocess.check_output(cmd1, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
         if len(port) == 0:
             pixmap = QPixmap(QSize(1270, 790))
@@ -167,7 +170,7 @@ class Ui_MainWindow(object):
             self.preview.setPixmap(pixmap)
 
     def get_vm_list(self):
-        output = subprocess.check_output("vm list | grep -v CPU | awk '{ print $1 }'", shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
+        output = subprocess.check_output("mdo vm list | grep -v CPU | awk '{ print $1 }'", shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
         vm_list = self.parse_vm_settings(output)
         vm_list.append('Host')
         return vm_list
