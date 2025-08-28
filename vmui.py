@@ -12,7 +12,7 @@ import os
 import subprocess
 import time
 from PyQt5 import QtCore, QtGui, QtWidgets#, QWebEngineView
-from PyQt5.QtWidgets import QLabel
+from PyQt5.QtWidgets import QLabel, QInputDialog, QWidget
 from PyQt5.QtGui import QPixmap, QColor
 from PyQt5.QtCore import QSize
 import asyncio, asyncvnc
@@ -38,7 +38,8 @@ async def vnc_capture(port=5900):
             return
 
 
-class Ui_MainWindow(object):
+class Ui_MainWindow(QWidget):
+#class Ui_MainWindow(object):
 
     vnc_num = 1
     vm_buttons = []
@@ -56,34 +57,40 @@ class Ui_MainWindow(object):
         self.centralwidget.setObjectName("centralwidget")
 
         self.pushButton = QtWidgets.QPushButton(self.centralwidget)
-        self.pushButton.setGeometry(QtCore.QRect(1620, 960, 251, 61))
+        self.pushButton.setGeometry(QtCore.QRect(1620, 960, 150, 60))
         self.pushButton.setStyleSheet("font: 14pt \"Noto Sans\";")
         self.pushButton.setObjectName("pushButton")
         self.pushButton.clicked.connect(lambda: self.open_vm(MainWindow))
 
         self.exportButton = QtWidgets.QPushButton(self.centralwidget)
-        self.exportButton.setGeometry(QtCore.QRect(1320, 960, 251, 61))
+        self.exportButton.setGeometry(QtCore.QRect(1420, 960, 150, 60))
         self.exportButton.setStyleSheet("font: 14pt \"Noto Sans\";")
         self.exportButton.setObjectName("exportButton")
-        self.exportButton.clicked.connect(lambda: self.export_vm(vm=self.curr_vm))
+        self.exportButton.clicked.connect(lambda: self.export_vmdk(vm=self.curr_vm))
 
         self.importButton = QtWidgets.QPushButton(self.centralwidget)
-        self.importButton.setGeometry(QtCore.QRect(1020, 960, 251, 61))
+        self.importButton.setGeometry(QtCore.QRect(1220, 960, 150, 60))
         self.importButton.setStyleSheet("font: 14pt \"Noto Sans\";")
         self.importButton.setObjectName("importButton")
-        self.importButton.clicked.connect(lambda: self.import_vm())
+        self.importButton.clicked.connect(lambda: self.import_vmdk(vm=self.curr_vm))
 
         self.exportDiffButton = QtWidgets.QPushButton(self.centralwidget)
-        self.exportDiffButton.setGeometry(QtCore.QRect(720, 960, 251, 61))
+        self.exportDiffButton.setGeometry(QtCore.QRect(1020, 960, 150, 60))
         self.exportDiffButton.setStyleSheet("font: 14pt \"Noto Sans\";")
         self.exportDiffButton.setObjectName("exportDiffButton")
         self.exportDiffButton.clicked.connect(lambda: self.export_diff())
 
         self.importDiffButton = QtWidgets.QPushButton(self.centralwidget)
-        self.importDiffButton.setGeometry(QtCore.QRect(420, 960, 251, 61))
+        self.importDiffButton.setGeometry(QtCore.QRect(820, 960, 150, 60))
         self.importDiffButton.setStyleSheet("font: 14pt \"Noto Sans\";")
         self.importDiffButton.setObjectName("importDiffButton")
         self.importDiffButton.clicked.connect(lambda: self.import_diff())
+
+        self.cloneButton = QtWidgets.QPushButton(self.centralwidget)
+        self.cloneButton.setGeometry(QtCore.QRect(820, 960, 150, 60))
+        self.cloneButton.setStyleSheet("font: 14pt \"Noto Sans\";")
+        self.cloneButton.setObjectName("cloneButton")
+        self.cloneButton.clicked.connect(lambda: self.clone_vm(src_vm=self.curr_vm))
         
         self.frame = QtWidgets.QFrame(self.centralwidget)
         self.frame.setGeometry(QtCore.QRect(0, 0, 351, 1041))
@@ -144,6 +151,7 @@ class Ui_MainWindow(object):
         self.importButton.setText(_translate("MainWindow", "Import VM"))
         self.exportDiffButton.setText(_translate("MainWindow", "Export Diff"))
         self.importDiffButton.setText(_translate("MainWindow", "Import Diff"))
+        self.cloneButton.setText(_translate("MainWindow", "Clone VM"))
         self.label.setText(_translate("MainWindow", self.curr_vm))
 
     def open_vm(self, MainWindow):
@@ -217,40 +225,79 @@ class Ui_MainWindow(object):
     
         return result
 
-    def export_vm(self, vm="ubuntu0", export_dir="/tmp"):
+    def export_vmdk(self, vm="ubuntu0", export_dir="/tmp"):
         vm_dataset=f"{vm_dir_dataset}/{vm}"
-        vm_base_snap=f"{vm_dataset}@snap0"
-        if not lzc.lzc_exists(vm_base_snap.encode()):
-            print(f"{vm_base_snap} not exist, snapshoting")
-            try:
-                lzc.lzc_snapshot([vm_base_snap.encode()])
-            except Exception as err:
-                print(err)
-                return
+        vm_disk=f"{vm_dataset}/disk0"
+        vm_base_snap=f"{vm_disk}@snap0"
+        if not lzc.lzc_exists(vm_disk.encode()):
+            print(f"{vm_disk} not exist")
+            return
  
-        with open(f"{export_dir}/{vm}-base.zfs", 'w') as f:
-            print(f"exporting {vm_base_snap}")
-            lzc.lzc_send(vm_base_snap.encode(), fromsnap=None, fd=f.fileno())
+        img_file = f"{vm}_disk0.img"
+        vmdk_file = f"{vm}_disk0.vmdk"
+        #size = subprocess.check_output(f"zfs list | grep {vm_disk}" + " | awk '{ print $2 }'", shell=True)
+        #subprocess.run(f"truncate -s {size} {img_file}", shell=True)
+        subprocess.run(f"dd if=/dev/zvol/{vm_disk} of={img_file} bs=1M", shell=True)
+        subprocess.run(f"qemu-img convert -f raw -O vmdk {img_file} {vmdk_file}", shell=True)
 
         return
 
-    def import_vm(self, vm="ubuntu3", img="/tmp/ubuntu0-base.zfs"):
+    def import_vmdk(self, vm="ubuntu3", img="./fbsd-zvol-3_disk0.vmdk"):
         vm_dataset=f"{vm_dir_dataset}/{vm}"
+        vm_disk=f"{vm_dataset}/disk0"
         vm_base_snap=f"{vm_dataset}@snap0"
 
-        if lzc.lzc_exists(vm_dataset.encode()):
-            print(f"{vm_dataset} exists, cannot import")
+        if not lzc.lzc_exists(vm_disk.encode()):
+            print(f"{vm_dataset} does not exists, cannot import")
+            # TODO: create a disk volume if does not exist
             return
 
         if not os.path.isfile(img):
             print(f"{img} is not a file")
             return
 
-        with open(img, 'r') as f:
-            print(f"Importing {vm_base_snap}")
-            print(f.fileno())
-            #lzc.lzc_receive(vm_base_snap.encode(), fd=f.fileno())
-            subprocess.run(f"cat {img} | mdo zfs recv {vm_dataset}", shell=True)
+        if img.split(".")[-1] != "vmdk":
+            print(f"{img} is not a vmdk file")
+            return
+
+        img_file = img.split(".")[0] + ".img"
+
+        subprocess.run(f"qemu-img convert -f vmdk -O raw {img} {img_file}", shell=True)
+        subprocess.run(f"dd if={img_file} of=/dev/zvol/{vm_disk} bs=1M", shell=True)
+
+        return
+
+    def clone_vm(self, src_vm="fbsd-zvol-2", dst_vm="fbsd-zvol-4"):
+        dst_vm = self.get_string_input()
+        src_vm_dataset = f"{vm_dir_dataset}/{src_vm}"
+        dst_vm_dataset = f"{vm_dir_dataset}/{dst_vm}"
+        src_vm_base_snap = f"{src_vm_dataset}@snap0"
+        src_vm_disk_base_snap = f"{src_vm_dataset}/disk0@snap0"
+
+        if not lzc.lzc_exists(src_vm_dataset.encode()):
+            print(f"{src_vm_dataset} not exists")
+            return
+
+        if lzc.lzc_exists(dst_vm_dataset.encode()):
+            print(f"{dst_vm_dataset} already exists")
+            return
+
+#        if lzc.lzc_exists(src_vm_base_snap.encode()):
+#            print(f"Found {src_vm_base_snap}, recreating it")
+#            lzc.lzc_destroy_snaps([src_vm_base_snap.encode()], defer=False)
+
+#        if lzc.lzc_exists(src_vm_disk_base_snap.encode()):
+#            print(f"Found {src_vm_disk_base_snap}, recreating it")
+#            lzc.lzc_destroy_snaps([src_vm_disk_base_snap.encode()], defer=False)
+            
+#        subprocess.run(f"mdo vm snapshot {src_vm}@snap0", shell=True)
+        subprocess.run(f"mdo vm clone {src_vm} {dst_vm}", shell=True)
+        subprocess.run(f"mdo vm snapshot {dst_vm}@snap0", shell=True)
+
+    def set_as_base(self, vm="fbsd-zvol-2"):
+        # should take snapshot "snap0" and prohibit further modification
+        # when cloning, use snapshot "snap0" to clone
+        return
 
     def export_diff(self, vm="ubuntu2", export_dir="/tmp"):
         timestamp_str = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
@@ -291,3 +338,10 @@ class Ui_MainWindow(object):
 
         conf = subprocess.check_output(f"ls /{vm_dataset} | grep .conf", shell=True, stderr=subprocess.STDOUT, universal_newlines=True).strip()
         os.rename(f"/{vm_dataset}/{conf}", f"/{vm_dataset}/{vm}.conf")
+
+    def get_string_input(self):
+        name, ok = QInputDialog.getText(self, 'Input Dialog', 'Enter your name:')
+        if ok:
+            return name
+        else:
+            return name
