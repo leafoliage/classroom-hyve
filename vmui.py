@@ -11,6 +11,7 @@ import sys
 import os
 import subprocess
 import time
+import shutil
 from PyQt5 import QtCore, QtGui, QtWidgets#, QWebEngineView
 from PyQt5.QtWidgets import QLabel, QInputDialog, QWidget
 from PyQt5.QtGui import QPixmap, QColor
@@ -21,8 +22,10 @@ import libzfs_core as lzc
 from datetime import datetime
 
 
-vncviewer_path="./vncviewer"
+vncviewer_path="/usr/local/bin/vncviewer"
 vm_dir_dataset="zroot/vm"
+vm_dir_mountpoint="/zroot/vm"
+default_template=f"{vm_dir_mountpoint}/.templates/zvol-uefi-graph.conf"
 
 
 async def vnc_capture(port=5900):
@@ -57,38 +60,50 @@ class Ui_MainWindow(QWidget):
         self.centralwidget.setObjectName("centralwidget")
 
         self.pushButton = QtWidgets.QPushButton(self.centralwidget)
-        self.pushButton.setGeometry(QtCore.QRect(1620, 960, 150, 60))
-        self.pushButton.setStyleSheet("font: 14pt \"Noto Sans\";")
+        self.pushButton.setGeometry(QtCore.QRect(1800, 960, 120, 60))
+        self.pushButton.setStyleSheet("font: 12pt \"Noto Sans\";")
         self.pushButton.setObjectName("pushButton")
         self.pushButton.clicked.connect(lambda: self.open_vm(MainWindow))
 
-        self.exportButton = QtWidgets.QPushButton(self.centralwidget)
-        self.exportButton.setGeometry(QtCore.QRect(1420, 960, 150, 60))
-        self.exportButton.setStyleSheet("font: 14pt \"Noto Sans\";")
-        self.exportButton.setObjectName("exportButton")
-        self.exportButton.clicked.connect(lambda: self.export_vmdk(vm=self.curr_vm))
+        self.exportVmButton = QtWidgets.QPushButton(self.centralwidget)
+        self.exportVmButton.setGeometry(QtCore.QRect(1650, 960, 120, 60))
+        self.exportVmButton.setStyleSheet("font: 12pt \"Noto Sans\";")
+        self.exportVmButton.setObjectName("exportVmButton")
+        self.exportVmButton.clicked.connect(lambda: self.export_vm(vm=self.curr_vm))
 
-        self.importButton = QtWidgets.QPushButton(self.centralwidget)
-        self.importButton.setGeometry(QtCore.QRect(1220, 960, 150, 60))
-        self.importButton.setStyleSheet("font: 14pt \"Noto Sans\";")
-        self.importButton.setObjectName("importButton")
-        self.importButton.clicked.connect(lambda: self.import_vmdk(vm=self.curr_vm))
+        self.importVmButton = QtWidgets.QPushButton(self.centralwidget)
+        self.importVmButton.setGeometry(QtCore.QRect(1500, 960, 120, 60))
+        self.importVmButton.setStyleSheet("font: 12pt \"Noto Sans\";")
+        self.importVmButton.setObjectName("importVmButton")
+        self.importVmButton.clicked.connect(lambda: self.import_vm())
+
+        self.exportVmdkButton = QtWidgets.QPushButton(self.centralwidget)
+        self.exportVmdkButton.setGeometry(QtCore.QRect(1350, 960, 120, 60))
+        self.exportVmdkButton.setStyleSheet("font: 12pt \"Noto Sans\";")
+        self.exportVmdkButton.setObjectName("exportVmdkButton")
+        self.exportVmdkButton.clicked.connect(lambda: self.export_vmdk(vm=self.curr_vm))
+
+        self.importVmdkButton = QtWidgets.QPushButton(self.centralwidget)
+        self.importVmdkButton.setGeometry(QtCore.QRect(1200, 960, 120, 60))
+        self.importVmdkButton.setStyleSheet("font: 12pt \"Noto Sans\";")
+        self.importVmdkButton.setObjectName("importVmdkButton")
+        self.importVmdkButton.clicked.connect(lambda: self.import_vmdk(vm=self.curr_vm))
 
         self.exportDiffButton = QtWidgets.QPushButton(self.centralwidget)
-        self.exportDiffButton.setGeometry(QtCore.QRect(1020, 960, 150, 60))
-        self.exportDiffButton.setStyleSheet("font: 14pt \"Noto Sans\";")
+        self.exportDiffButton.setGeometry(QtCore.QRect(1050, 960, 120, 60))
+        self.exportDiffButton.setStyleSheet("font: 12pt \"Noto Sans\";")
         self.exportDiffButton.setObjectName("exportDiffButton")
         self.exportDiffButton.clicked.connect(lambda: self.export_diff())
 
         self.importDiffButton = QtWidgets.QPushButton(self.centralwidget)
-        self.importDiffButton.setGeometry(QtCore.QRect(820, 960, 150, 60))
-        self.importDiffButton.setStyleSheet("font: 14pt \"Noto Sans\";")
+        self.importDiffButton.setGeometry(QtCore.QRect(900, 960, 120, 60))
+        self.importDiffButton.setStyleSheet("font: 12pt \"Noto Sans\";")
         self.importDiffButton.setObjectName("importDiffButton")
         self.importDiffButton.clicked.connect(lambda: self.import_diff())
 
         self.cloneButton = QtWidgets.QPushButton(self.centralwidget)
-        self.cloneButton.setGeometry(QtCore.QRect(820, 960, 150, 60))
-        self.cloneButton.setStyleSheet("font: 14pt \"Noto Sans\";")
+        self.cloneButton.setGeometry(QtCore.QRect(750, 960, 120, 60))
+        self.cloneButton.setStyleSheet("font: 12pt \"Noto Sans\";")
         self.cloneButton.setObjectName("cloneButton")
         self.cloneButton.clicked.connect(lambda: self.clone_vm(src_vm=self.curr_vm))
         
@@ -147,8 +162,10 @@ class Ui_MainWindow(QWidget):
         _translate = QtCore.QCoreApplication.translate
         MainWindow.setWindowTitle(_translate("MainWindow", "MainWindow"))
         self.pushButton.setText(_translate("MainWindow", "Enter VM"))
-        self.exportButton.setText(_translate("MainWindow", "Export VM"))
-        self.importButton.setText(_translate("MainWindow", "Import VM"))
+        self.exportVmButton.setText(_translate("MainWindow", "Export VM"))
+        self.importVmButton.setText(_translate("MainWindow", "Import VM"))
+        self.exportVmdkButton.setText(_translate("MainWindow", "Export VMDK"))
+        self.importVmdkButton.setText(_translate("MainWindow", "Import VMDK"))
         self.exportDiffButton.setText(_translate("MainWindow", "Export Diff"))
         self.importDiffButton.setText(_translate("MainWindow", "Import Diff"))
         self.cloneButton.setText(_translate("MainWindow", "Clone VM"))
@@ -225,6 +242,60 @@ class Ui_MainWindow(QWidget):
     
         return result
 
+    def export_vm(self, vm="ubuntu0", export_dir="/tmp"):
+        vm_dataset=f"{vm_dir_dataset}/{vm}"
+        vm_disk=f"{vm_dataset}/disk0"
+        #vm_base_snap=f"{vm_disk}@snap0"
+        if not lzc.lzc_exists(vm_disk.encode()):
+            print(f"{vm_disk} not exist")
+            return
+ 
+        img_file = f"{export_dir}/{vm}_disk0.zfs"
+        with open(img_file, "w") as f:
+            lzc.lzc_send(vm_disk.encode(), fromsnap=None, fd=f.fileno())
+
+        return
+
+
+    def import_vm(self):
+        vm = self.get_string_input(title="Imported VM Name")
+        img = self.get_string_input(title="ZFS image file path")
+        vm_dataset=f"{vm_dir_dataset}/{vm}"
+        vm_disk_dataset=f"{vm_dataset}/disk0"
+        vm_dataset_mountpoint=f"{vm_dir_mountpoint}/{vm}"
+        #vm_base_snap=f"{vm_dataset}@snap0"
+
+        if lzc.lzc_exists(vm_dataset.encode()):
+            print(f"{vm_dataset} exists, cannot import")
+            return
+
+        if not os.path.isfile(img):
+            print(f"{img} is not a file")
+            return
+
+        print(f"{vm_dataset} creating")
+        subprocess.run(f"mdo zfs create {vm_dataset} && mdo zfs set mountpoint={vm_dataset_mountpoint} {vm_dataset} && mdo zfs mount {vm_dataset}", shell=True)
+        #print(f"{vm_dataset} created")
+        #subprocess.run(f"mdo zfs set mountpoint={vm_dataset_mountpoint} {vm_dataset}")
+        #print(f"{vm_dataset} mount set")
+        #subprocess.run(f"mdo zfs mount {vm_dataset}", shell=True)
+        #print(f"mounting {vm_dataset}")
+        shutil.copyfile(default_template, f"{vm_dataset_mountpoint}/{vm}.conf")
+        with open(img, 'r') as f:
+            print(f"Importing {vm_disk_dataset}")
+            #print(f.fileno())
+            #lzc.lzc_receive(vm_base_snap.encode(), fd=f.fileno())
+            subprocess.run(f"cat {img} | mdo zfs recv {vm_disk_dataset}", shell=True)
+        
+        #lzc.lzc_set_prop(vm_dataset.encode(), b"mountpoint", f"{vm_dataset_mountpoint}".encode())
+        #subprocess.run(f"mdo zfs mount {vm_dataset}", shell=True)
+        #shutil.copyfile(default_template, f"{vm_dataset_mountpoint}/{vm}.conf")
+
+        print(f"Import {vm_dataset} done")
+
+        return
+
+
     def export_vmdk(self, vm="ubuntu0", export_dir="/tmp"):
         vm_dataset=f"{vm_dir_dataset}/{vm}"
         vm_disk=f"{vm_dataset}/disk0"
@@ -233,8 +304,8 @@ class Ui_MainWindow(QWidget):
             print(f"{vm_disk} not exist")
             return
  
-        img_file = f"{vm}_disk0.img"
-        vmdk_file = f"{vm}_disk0.vmdk"
+        img_file = f"{export_dir}/{vm}_disk0.img"
+        vmdk_file = f"{export_dir}/{vm}_disk0.vmdk"
         #size = subprocess.check_output(f"zfs list | grep {vm_disk}" + " | awk '{ print $2 }'", shell=True)
         #subprocess.run(f"truncate -s {size} {img_file}", shell=True)
         subprocess.run(f"dd if=/dev/zvol/{vm_disk} of={img_file} bs=1M", shell=True)
@@ -242,7 +313,10 @@ class Ui_MainWindow(QWidget):
 
         return
 
+
     def import_vmdk(self, vm="ubuntu3", img="./fbsd-zvol-3_disk0.vmdk"):
+        # TODO: Add input for img file path, either pure text or file finder
+        img = self.get_string_input()
         vm_dataset=f"{vm_dir_dataset}/{vm}"
         vm_disk=f"{vm_dataset}/disk0"
         vm_base_snap=f"{vm_dataset}@snap0"
@@ -318,6 +392,7 @@ class Ui_MainWindow(QWidget):
         #subprocess.run(f"zfs send -i {vm_base_snap} {vm_new_snap} > {diff_img}", shell=True)
 
     def import_diff(self, vm="ubuntu3", img="/tmp/ubuntu2-diff.zfs"):
+        # TODO: Add input for img file path, either pure text or file finder
         #timestamp_str = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
         vm_dataset=f"{vm_dir_dataset}/{vm}"
         vm_base_snap=f"{vm_dataset}@snap0"
@@ -339,8 +414,8 @@ class Ui_MainWindow(QWidget):
         conf = subprocess.check_output(f"ls /{vm_dataset} | grep .conf", shell=True, stderr=subprocess.STDOUT, universal_newlines=True).strip()
         os.rename(f"/{vm_dataset}/{conf}", f"/{vm_dataset}/{vm}.conf")
 
-    def get_string_input(self):
-        name, ok = QInputDialog.getText(self, 'Input Dialog', 'Enter your name:')
+    def get_string_input(self, title="Enter:"):
+        name, ok = QInputDialog.getText(self, 'Input Dialog', title)
         if ok:
             return name
         else:
