@@ -13,16 +13,16 @@ import subprocess
 import time
 import shutil
 from PyQt5 import QtCore, QtGui, QtWidgets#, QWebEngineView
-from PyQt5.QtWidgets import QLabel, QInputDialog, QWidget
+from PyQt5.QtWidgets import QLabel, QInputDialog, QWidget, QMessageBox
 from PyQt5.QtGui import QPixmap, QColor
-from PyQt5.QtCore import QSize
+from PyQt5.QtCore import QSize, Qt
 import asyncio, asyncvnc
 from PIL import Image
 import libzfs_core as lzc
 from datetime import datetime
 
 
-vncviewer_path="/usr/local/bin/vncviewer"
+vncviewer_path="/home/leaf/Workspace/tigervnc/vncviewer/vncviewer"
 vm_dir_dataset="zroot/vm"
 vm_dir_mountpoint="/zroot/vm"
 default_template=f"{vm_dir_mountpoint}/.templates/zvol-uefi-graph.conf"
@@ -93,19 +93,20 @@ class Ui_MainWindow(QWidget):
         self.exportDiffButton.setGeometry(QtCore.QRect(1050, 960, 120, 60))
         self.exportDiffButton.setStyleSheet("font: 12pt \"Noto Sans\";")
         self.exportDiffButton.setObjectName("exportDiffButton")
-        self.exportDiffButton.clicked.connect(lambda: self.export_diff())
+        self.exportDiffButton.clicked.connect(lambda: self.export_diff(vm=self.curr_vm))
 
         self.importDiffButton = QtWidgets.QPushButton(self.centralwidget)
         self.importDiffButton.setGeometry(QtCore.QRect(900, 960, 120, 60))
         self.importDiffButton.setStyleSheet("font: 12pt \"Noto Sans\";")
         self.importDiffButton.setObjectName("importDiffButton")
-        self.importDiffButton.clicked.connect(lambda: self.import_diff())
+        self.importDiffButton.clicked.connect(lambda: self.import_diff(vm=self.curr_vm))
 
         self.cloneButton = QtWidgets.QPushButton(self.centralwidget)
         self.cloneButton.setGeometry(QtCore.QRect(750, 960, 120, 60))
         self.cloneButton.setStyleSheet("font: 12pt \"Noto Sans\";")
         self.cloneButton.setObjectName("cloneButton")
-        self.cloneButton.clicked.connect(lambda: self.clone_vm(src_vm=self.curr_vm))
+        #self.cloneButton.clicked.connect(lambda: self.test())
+        self.cloneButton.clicked.connect(lambda: self.clone_vm(vm=self.curr_vm))
         
         self.frame = QtWidgets.QFrame(self.centralwidget)
         self.frame.setGeometry(QtCore.QRect(0, 0, 351, 1041))
@@ -138,7 +139,8 @@ class Ui_MainWindow(QWidget):
         self.preview = QtWidgets.QLabel(self.centralwidget)
         pixmap = QtGui.QPixmap("shot.png")
         self.preview.setPixmap(pixmap)
-        self.preview.setGeometry(QtCore.QRect(500, 130, 1270, 790))
+        self.preview.setGeometry(QtCore.QRect(500, 130, 1280, 720))
+        #self.preview.setGeometry(QtCore.QRect(500, 130, 1270, 790))
         
         self.label = QtWidgets.QLabel(self.centralwidget)
         self.label.setGeometry(QtCore.QRect(400, 20, 231, 51))
@@ -158,6 +160,13 @@ class Ui_MainWindow(QWidget):
         self.retranslateUi(MainWindow)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
+    def show_msg(self, title, msg):
+        QMessageBox.information(
+            self,
+            title,
+            msg
+        )
+
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
         MainWindow.setWindowTitle(_translate("MainWindow", "MainWindow"))
@@ -168,7 +177,7 @@ class Ui_MainWindow(QWidget):
         self.importVmdkButton.setText(_translate("MainWindow", "Import VMDK"))
         self.exportDiffButton.setText(_translate("MainWindow", "Export Diff"))
         self.importDiffButton.setText(_translate("MainWindow", "Import Diff"))
-        self.cloneButton.setText(_translate("MainWindow", "Clone VM"))
+        self.cloneButton.setText(_translate("MainWindow", "Update Version"))
         self.label.setText(_translate("MainWindow", self.curr_vm))
 
     def open_vm(self, MainWindow):
@@ -223,6 +232,11 @@ class Ui_MainWindow(QWidget):
         asyncio.run(vnc_capture(int(port)))
         if os.path.isfile("shot.png"):
             pixmap = QtGui.QPixmap("shot.png")
+            pixmap = pixmap.scaled(
+                1280, 720,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
             self.preview.setPixmap(pixmap)
 
     def get_vm_list(self):
@@ -245,14 +259,24 @@ class Ui_MainWindow(QWidget):
     def export_vm(self, vm="ubuntu0", export_dir="/tmp"):
         vm_dataset=f"{vm_dir_dataset}/{vm}"
         vm_disk=f"{vm_dataset}/disk0"
-        #vm_base_snap=f"{vm_disk}@snap0"
+        vm_base_snap=f"{vm_disk}@snap0"
+
+        running = subprocess.check_output(f"mdo vm info {vm} | grep state", shell=True)
+        if b"running" in running:
+            subprocess.run(f"mdo vm stop {vm}", shell=True)
+
         if not lzc.lzc_exists(vm_disk.encode()):
             print(f"{vm_disk} not exist")
             return
+
+        if lzc.lzc_exists(vm_base_snap.encode()):
+            lzc.lzc_destroy_snaps([vm_base_snap.encode()], False)
+
+        lzc.lzc_snapshot([vm_base_snap.encode()])
  
         img_file = f"{export_dir}/{vm}_disk0.zfs"
         with open(img_file, "w") as f:
-            lzc.lzc_send(vm_disk.encode(), fromsnap=None, fd=f.fileno())
+            lzc.lzc_send(vm_base_snap.encode(), fromsnap=None, fd=f.fileno())
 
         return
 
@@ -341,32 +365,49 @@ class Ui_MainWindow(QWidget):
 
         return
 
-    def clone_vm(self, src_vm="fbsd-zvol-2", dst_vm="fbsd-zvol-4"):
-        dst_vm = self.get_string_input()
-        src_vm_dataset = f"{vm_dir_dataset}/{src_vm}"
-        dst_vm_dataset = f"{vm_dir_dataset}/{dst_vm}"
-        src_vm_base_snap = f"{src_vm_dataset}@snap0"
-        src_vm_disk_base_snap = f"{src_vm_dataset}/disk0@snap0"
-
-        if not lzc.lzc_exists(src_vm_dataset.encode()):
-            print(f"{src_vm_dataset} not exists")
+    def clone_vm(self, vm="windows0"):
+        out = subprocess.run(f"ssh vcsuser@vcs ls /vcs/windows0/*.gz", shell=True)
+        ok = self.get_yn("Update Version", "New version 'windows0-2025-12-21T01-19-23.zfs' found, update?")
+        if not ok:
             return
+        subprocess.run(f"mdo vm stop {vm}", shell=True)
+        self.show_msg(f"Update Version", f"Downloading newest version of {vm}")
+        subprocess.run(f"scp vcsuser@vcs:/vcs/windows0/windows0-2025-12-21T01-19-23.zfs.tar.gz /tmp", shell=True)
+        subprocess.run(f"tar xf /tmp/windows0-2025-12-21T01-19-23.zfs.tar.gz", shell=True)
+        self.show_msg(f"Update Version", f"Applying newest version of {vm}")
+        subprocess.run(f"mdo zfs rollback zroot/vm/{vm}/disk0@snap0", shell=True)
+        subprocess.run(f"cat /tmp/windows0-2025-12-21T01-19-23.zfs | mdo zfs receive zroot/vm/{vm}/disk0", shell=True)
+    
+        subprocess.run(f"mdo vm start {vm}", shell=True)
+        self.show_msg(f"Update Version", f"Version update done! {vm} has been restarted.")
+        return
 
-        if lzc.lzc_exists(dst_vm_dataset.encode()):
-            print(f"{dst_vm_dataset} already exists")
-            return
-
-#        if lzc.lzc_exists(src_vm_base_snap.encode()):
-#            print(f"Found {src_vm_base_snap}, recreating it")
-#            lzc.lzc_destroy_snaps([src_vm_base_snap.encode()], defer=False)
-
-#        if lzc.lzc_exists(src_vm_disk_base_snap.encode()):
-#            print(f"Found {src_vm_disk_base_snap}, recreating it")
-#            lzc.lzc_destroy_snaps([src_vm_disk_base_snap.encode()], defer=False)
-            
-#        subprocess.run(f"mdo vm snapshot {src_vm}@snap0", shell=True)
-        subprocess.run(f"mdo vm clone {src_vm} {dst_vm}", shell=True)
-        subprocess.run(f"mdo vm snapshot {dst_vm}@snap0", shell=True)
+#    def clone_vm(self, src_vm="fbsd-zvol-2", dst_vm="fbsd-zvol-4"):
+#        dst_vm = self.get_string_input()
+#        src_vm_dataset = f"{vm_dir_dataset}/{src_vm}"
+#        dst_vm_dataset = f"{vm_dir_dataset}/{dst_vm}"
+#        src_vm_base_snap = f"{src_vm_dataset}@snap0"
+#        src_vm_disk_base_snap = f"{src_vm_dataset}/disk0@snap0"
+#
+#        if not lzc.lzc_exists(src_vm_dataset.encode()):
+#            print(f"{src_vm_dataset} not exists")
+#            return
+#
+#        if lzc.lzc_exists(dst_vm_dataset.encode()):
+#            print(f"{dst_vm_dataset} already exists")
+#            return
+#
+##        if lzc.lzc_exists(src_vm_base_snap.encode()):
+##            print(f"Found {src_vm_base_snap}, recreating it")
+##            lzc.lzc_destroy_snaps([src_vm_base_snap.encode()], defer=False)
+#
+##        if lzc.lzc_exists(src_vm_disk_base_snap.encode()):
+##            print(f"Found {src_vm_disk_base_snap}, recreating it")
+##            lzc.lzc_destroy_snaps([src_vm_disk_base_snap.encode()], defer=False)
+#            
+##        subprocess.run(f"mdo vm snapshot {src_vm}@snap0", shell=True)
+#        subprocess.run(f"mdo vm clone {src_vm} {dst_vm}", shell=True)
+#        subprocess.run(f"mdo vm snapshot {dst_vm}@snap0", shell=True)
 
     def set_as_base(self, vm="fbsd-zvol-2"):
         # should take snapshot "snap0" and prohibit further modification
@@ -375,7 +416,7 @@ class Ui_MainWindow(QWidget):
 
     def export_diff(self, vm="ubuntu2", export_dir="/tmp"):
         timestamp_str = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-        vm_dataset=f"{vm_dir_dataset}/{vm}"
+        vm_dataset=f"{vm_dir_dataset}/{vm}/disk0"
         vm_base_snap=f"{vm_dataset}@snap0"
         vm_new_snap=f"{vm_dataset}@{timestamp_str}"
 
@@ -392,9 +433,9 @@ class Ui_MainWindow(QWidget):
         #subprocess.run(f"zfs send -i {vm_base_snap} {vm_new_snap} > {diff_img}", shell=True)
 
     def import_diff(self, vm="ubuntu3", img="/tmp/ubuntu2-diff.zfs"):
-        # TODO: Add input for img file path, either pure text or file finder
         #timestamp_str = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-        vm_dataset=f"{vm_dir_dataset}/{vm}"
+        img = self.get_string_input(title="Diff Image Path")
+        vm_dataset=f"{vm_dir_dataset}/{vm}/disk0"
         vm_base_snap=f"{vm_dataset}@snap0"
         #vm_new_snap=f"{vm_dataset}@{timestamp_str}"
 
@@ -411,8 +452,8 @@ class Ui_MainWindow(QWidget):
             #lzc.lzc_receive(vm_new_snap.encode(), fd=f.fileno())
             subprocess.run(f"cat {img} | mdo zfs receive {vm_dataset}", shell=True)
 
-        conf = subprocess.check_output(f"ls /{vm_dataset} | grep .conf", shell=True, stderr=subprocess.STDOUT, universal_newlines=True).strip()
-        os.rename(f"/{vm_dataset}/{conf}", f"/{vm_dataset}/{vm}.conf")
+        #conf = subprocess.check_output(f"ls /{vm_dataset} | grep .conf", shell=True, stderr=subprocess.STDOUT, universal_newlines=True).strip()
+        #os.rename(f"/{vm_dataset}/{conf}", f"/{vm_dataset}/{vm}.conf")
 
     def get_string_input(self, title="Enter:"):
         name, ok = QInputDialog.getText(self, 'Input Dialog', title)
@@ -420,3 +461,17 @@ class Ui_MainWindow(QWidget):
             return name
         else:
             return name
+
+    def get_yn(self, title, question):
+        reply = QMessageBox.question(
+            self,
+            title,
+            question,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            return True
+        else:
+            return False
