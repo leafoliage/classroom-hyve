@@ -16,6 +16,7 @@ cp zvol-uefi-graph.conf /${pool}/vm/.templates/
 
 pip install -r requirements.txt
 
+echo 'mac_do_load="YES"' >> /boot/loader.conf
 wheel_ids=$(getent group wheel | cut -d : -f 4 | sed 's/,/ /g' | xargs -n1 id -u)
 rules=""
 for uid in ${wheel_ids}; do
