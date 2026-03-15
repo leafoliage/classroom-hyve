@@ -11,6 +11,7 @@ sysrc -qc vm_dir || {
 	vm switch create public
 	vm switch add public em0
 }
+cp zvol-uefi-graph.conf /${pool}/vm/.templates/
 
 pip install -r requirements.txt
 
